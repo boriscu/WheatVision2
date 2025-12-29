@@ -12,6 +12,9 @@ import torch
 from wheatvision.config.models import BoundingBox, FrameData, SegmentationResult
 from wheatvision.config.settings import SAM2Settings, get_sam2_settings
 from wheatvision.engines.base_engine import BaseSegmentationEngine
+from wheatvision.utils import get_logger
+
+_logger = get_logger("engines.sam2")
 
 
 class SAM2Engine(BaseSegmentationEngine):
@@ -50,6 +53,7 @@ class SAM2Engine(BaseSegmentationEngine):
         Raises:
             FileNotFoundError: If checkpoint or config not found.
         """
+        _logger.info("Loading SAM2 model...")
         start_time = time.perf_counter()
 
         repo_path = Path(self._settings.repo).resolve()
@@ -82,6 +86,9 @@ class SAM2Engine(BaseSegmentationEngine):
         elif '/' not in config_name:
             config_name = f"configs/sam2.1/{config_name}"
         
+        _logger.debug(f"Using config: {config_name}")
+        _logger.debug(f"Using checkpoint: {checkpoint_path}")
+        
         model = build_sam2(
             config_file=config_name,
             ckpt_path=str(checkpoint_path),
@@ -93,6 +100,7 @@ class SAM2Engine(BaseSegmentationEngine):
 
         self._is_loaded = True
         self._model_load_time_ms = (time.perf_counter() - start_time) * 1000
+        _logger.info(f"SAM2 model loaded in {self._model_load_time_ms:.0f}ms")
 
     def unload_model(self) -> None:
         """Unload the model and free resources."""

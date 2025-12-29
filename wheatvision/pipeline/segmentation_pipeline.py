@@ -18,6 +18,9 @@ from wheatvision.io import FrameLoader
 from wheatvision.metrics import MetricsCalculator
 from wheatvision.postprocessing import PostprocessingPipeline
 from wheatvision.preprocessing import PreprocessingPipeline
+from wheatvision.utils import get_logger
+
+_logger = get_logger("pipeline")
 
 
 class SegmentationPipeline:
@@ -67,6 +70,7 @@ class SegmentationPipeline:
         if self._engine is not None:
             self._engine.unload_model()
 
+        _logger.info(f"Creating {self._model_type.value} engine...")
         self._engine = SegmentationEngineFactory.create(self._model_type)
         self._engine.load_model()
         self._is_engine_loaded = True
@@ -102,15 +106,21 @@ class SegmentationPipeline:
             - Segmentation results (postprocessed)
             - Metrics report
         """
+        _logger.info(f"Processing video: {video_path}")
         self._ensure_engine_loaded()
 
         self._frame_loader = FrameLoader(max_frames=max_frames)
         frames = self._frame_loader.load_video(video_path)
+        _logger.info(f"Loaded {len(frames)} frames")
 
+        _logger.info("Running preprocessing...")
         preprocessing_results = self._run_preprocessing(frames)
 
         roi = self._get_combined_roi(preprocessing_results)
+        if roi:
+            _logger.debug(f"Combined ROI: {roi.x_min},{roi.y_min} to {roi.x_max},{roi.y_max}")
 
+        _logger.info("Running segmentation...")
         segmentation_results = self._run_segmentation(frames, roi)
 
         if self._enable_postprocessing and frames:
@@ -127,6 +137,7 @@ class SegmentationPipeline:
             roi_area=roi_area,
         )
 
+        _logger.info(f"Pipeline complete. FPS: {metrics.speed_metrics.fps:.2f}")
         return frames, preprocessing_results, segmentation_results, metrics
 
     def process_frames(

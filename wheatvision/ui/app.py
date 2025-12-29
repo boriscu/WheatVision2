@@ -1,5 +1,6 @@
 """Main Gradio application for WheatVision2."""
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -15,6 +16,9 @@ from wheatvision.export import MaskExporter, ReportExporter, VideoExporter
 from wheatvision.io import FrameLoader
 from wheatvision.metrics import MetricsCalculator
 from wheatvision.pipeline import SegmentationPipeline
+from wheatvision.utils import setup_logging, get_logger
+
+_logger = get_logger("ui")
 
 
 class WheatVisionApp:
@@ -534,9 +538,14 @@ class WheatVisionApp:
 
 def launch_app() -> None:
     """Launch the Gradio application."""
+    setup_logging(level=logging.INFO)
+    _logger.info("Starting WheatVision2 application...")
+    
     settings = get_ui_settings()
     app = WheatVisionApp()
     interface = app.create_interface()
+    
+    _logger.info(f"Launching on http://{settings.host}:{settings.port}")
     interface.launch(
         server_name=settings.host,
         server_port=settings.port,

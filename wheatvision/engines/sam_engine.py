@@ -12,6 +12,9 @@ import torch
 from wheatvision.config.models import BoundingBox, FrameData, SegmentationResult
 from wheatvision.config.settings import SAMSettings, get_sam_settings
 from wheatvision.engines.base_engine import BaseSegmentationEngine
+from wheatvision.utils import get_logger
+
+_logger = get_logger("engines.sam")
 
 
 class SAMEngine(BaseSegmentationEngine):
@@ -46,6 +49,7 @@ class SAMEngine(BaseSegmentationEngine):
         Raises:
             FileNotFoundError: If checkpoint or repository not found.
         """
+        _logger.info("Loading SAM model...")
         start_time = time.perf_counter()
 
         repo_path = Path(self._settings.repo).resolve()
@@ -84,6 +88,7 @@ class SAMEngine(BaseSegmentationEngine):
 
         self._is_loaded = True
         self._model_load_time_ms = (time.perf_counter() - start_time) * 1000
+        _logger.info(f"SAM model loaded in {self._model_load_time_ms:.0f}ms")
 
     def unload_model(self) -> None:
         """Unload the model and free resources."""
@@ -156,10 +161,13 @@ class SAMEngine(BaseSegmentationEngine):
         self._ensure_loaded()
 
         results = []
-        for frame in frames:
+        for i, frame in enumerate(frames):
+            _logger.debug(f"Segmenting frame {i+1}/{len(frames)}")
             result = self.segment_frame(frame, roi)
+            _logger.debug(f"Frame {i+1}: {len(result.masks)} masks in {result.processing_time_ms:.1f}ms")
             results.append(result)
 
+        _logger.info(f"Completed {len(frames)} frames")
         return results
 
     @torch.inference_mode()
