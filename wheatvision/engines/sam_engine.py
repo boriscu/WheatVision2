@@ -41,6 +41,8 @@ class SAMEngine(BaseSegmentationEngine):
         self._pred_iou_thresh: float = 0.86
         self._stability_score_thresh: float = 0.92
         self._min_mask_region_area: int = 100
+        
+        self._merge_masks: bool = False  # Disabled - was causing display issues
 
     def load_model(self) -> None:
         """
@@ -128,9 +130,18 @@ class SAMEngine(BaseSegmentationEngine):
             image = frame.image
 
         masks, scores = self._run_amg(image)
+        _logger.info(f"AMG produced {len(masks)} masks")
 
         if roi is not None:
             masks = self._restore_mask_positions(masks, roi, frame.image.shape[:2])
+
+        if self._merge_masks and masks:
+            _logger.info(f"Merging {len(masks)} masks into 1 semantic mask")
+            merged = self._combine_masks(masks)
+            masks = [merged]
+            scores = [sum(scores) / len(scores)] if scores else [1.0]
+        
+        _logger.info(f"Returning {len(masks)} masks")
 
         processing_time_ms = (time.perf_counter() - start_time) * 1000
 
@@ -263,6 +274,38 @@ class SAMEngine(BaseSegmentationEngine):
                 min_mask_region_area=self._min_mask_region_area,
             )
 
+    def set_merge_masks(self, merge: bool) -> None:
+        """
+        Set whether to merge all masks into one semantic mask.
+        
+        Args:
+            merge: If True, all instance masks are combined into one.
+        """
+        self._merge_masks = merge
+
+    def _combine_masks(
+        self,
+        masks: List[np.ndarray],
+    ) -> np.ndarray:
+        """
+        Combine all instance masks into a single semantic mask.
+        
+        Args:
+            masks: List of instance masks.
+            
+        Returns:
+            Single combined mask with all instances merged.
+        """
+        if not masks:
+            return np.zeros((100, 100), dtype=np.uint8)
+        
+        combined = masks[0].copy()
+        for mask in masks[1:]:
+            combined = np.maximum(combined, mask)
+        return combined
+
     def get_model_name(self) -> str:
         """Get the model name."""
-        return f"SAM-{self._settings.model_type.value.upper()}-AMG"
+        suffix = "-Semantic" if self._merge_masks else "-Instance"
+        return f"SAM-{self._settings.model_type.value.upper()}{suffix}"
+

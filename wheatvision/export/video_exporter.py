@@ -20,14 +20,14 @@ class VideoExporter(BaseExporter):
 
     def __init__(
         self,
-        fps: float = 30.0,
+        fps: float = 10.0,
         codec: str = "mp4v",
     ) -> None:
         """
         Initialize the video exporter.
         
         Args:
-            fps: Frames per second for output video.
+            fps: Frames per second for output video (default 10 to match typical processing).
             codec: FourCC codec for video encoding.
         """
         self._fps = fps
@@ -57,6 +57,7 @@ class VideoExporter(BaseExporter):
         results: List[SegmentationResult],
         output_path: Path,
         alpha: float = 0.5,
+        fps: float | None = None,
     ) -> Path:
         """
         Create video with mask overlays.
@@ -66,6 +67,7 @@ class VideoExporter(BaseExporter):
             results: Segmentation results.
             output_path: Output video path.
             alpha: Overlay transparency.
+            fps: Output FPS. If None, uses instance default.
             
         Returns:
             Path to the video.
@@ -76,12 +78,14 @@ class VideoExporter(BaseExporter):
         if not frames:
             raise ValueError("No frames to export")
 
+        output_fps = fps if fps is not None else self._fps
+        
         height, width = frames[0].height, frames[0].width
         fourcc = cv2.VideoWriter_fourcc(*self._codec)
         writer = cv2.VideoWriter(
             str(output_path),
             fourcc,
-            self._fps,
+            output_fps,
             (width, height),
         )
 

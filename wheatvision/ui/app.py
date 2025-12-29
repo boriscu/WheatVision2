@@ -429,23 +429,34 @@ class WheatVisionApp:
         results: List[SegmentationResult],
     ) -> List[Tuple[np.ndarray, str]]:
         """Create gallery images for segmentation results."""
+        import cv2
         images = []
 
-        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255),
-                  (255, 255, 0), (255, 0, 255), (0, 255, 255)]
+        # Use green color for semantic mask (all wheat ears as one class)
+        color = (0, 255, 0)  # Green
 
         for i, (frame, result) in enumerate(zip(frames, results)):
             overlay = frame.image.copy()
-            for j, mask in enumerate(result.masks):
-                color = colors[j % len(colors)]
+            mask_pixel_count = 0
+            
+            for mask in result.masks:
                 mask_bool = mask > 0
+                mask_pixel_count += np.sum(mask_bool)
+                
+                # Fill mask with color blend
                 overlay[mask_bool] = (
                     0.5 * overlay[mask_bool] + 0.5 * np.array(color)
                 ).astype(np.uint8)
+                
+                # Draw contours for visibility
+                contours, _ = cv2.findContours(
+                    mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                )
+                cv2.drawContours(overlay, contours, -1, color, 2)
 
             images.append((
                 overlay,
-                f"Frame {i}: {len(result.masks)} masks ({result.processing_time_ms:.1f}ms)"
+                f"Frame {i}: {len(result.masks)} masks, {mask_pixel_count} px"
             ))
 
         return images
