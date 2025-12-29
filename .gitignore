@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# External dependencies (cloned repos)
+external/
+
+# Exports and outputs
+output/
+exports/

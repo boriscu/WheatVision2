@@ -1,0 +1,28 @@
+# Core dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Pydantic for configuration and data models
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+
+# Gradio UI
+gradio>=4.0.0
+
+# Metrics and visualization
+scikit-image>=0.21.0
+matplotlib>=3.7.0
+
+# Video processing
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.8
+
+# Export formats
+pandas>=2.0.0
+
+# Development dependencies (optional)
+pytest>=7.4.0
