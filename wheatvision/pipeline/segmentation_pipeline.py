@@ -86,6 +86,7 @@ class SegmentationPipeline:
         self,
         video_path: Path | str,
         max_frames: Optional[int] = None,
+        target_fps: Optional[float] = None,
     ) -> Tuple[
         List[FrameData],
         List[PreprocessingResult],
@@ -98,6 +99,8 @@ class SegmentationPipeline:
         Args:
             video_path: Path to the input video.
             max_frames: Optional limit on frames to process.
+            target_fps: Target FPS for processing (e.g., 10 for 10fps).
+                        If video is 60fps and target is 10, processes every 6th frame.
             
         Returns:
             Tuple of:
@@ -107,9 +110,11 @@ class SegmentationPipeline:
             - Metrics report
         """
         _logger.info(f"Processing video: {video_path}")
+        if target_fps:
+            _logger.info(f"Target FPS: {target_fps}")
         self._ensure_engine_loaded()
 
-        self._frame_loader = FrameLoader(max_frames=max_frames)
+        self._frame_loader = FrameLoader(max_frames=max_frames, target_fps=target_fps)
         frames = self._frame_loader.load_video(video_path)
         _logger.info(f"Loaded {len(frames)} frames")
 

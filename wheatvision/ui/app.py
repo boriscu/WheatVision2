@@ -108,6 +108,10 @@ class WheatVisionApp:
                     1, 100, value=10, step=1,
                     label="Max Frames to Process",
                 )
+                sam_target_fps = gr.Slider(
+                    1, 60, value=10, step=1,
+                    label="Target FPS (downsample from video FPS)",
+                )
                 sam_run_btn = gr.Button("Run SAM Segmentation", variant="primary")
 
             with gr.Column(scale=2):
@@ -147,7 +151,7 @@ class WheatVisionApp:
                 sam_video, sam_enable_preprocess, sam_enable_postprocess,
                 sam_hsv_h_low, sam_hsv_s_low, sam_hsv_v_low,
                 sam_hsv_h_high, sam_hsv_s_high, sam_hsv_v_high,
-                sam_min_aspect, sam_max_aspect, sam_max_frames,
+                sam_min_aspect, sam_max_aspect, sam_max_frames, sam_target_fps,
             ],
             outputs=[sam_status, sam_metrics, sam_preprocess_gallery, sam_result_gallery],
         )
@@ -201,6 +205,10 @@ class WheatVisionApp:
                     1, 100, value=10, step=1,
                     label="Max Frames to Process",
                 )
+                sam2_target_fps = gr.Slider(
+                    1, 60, value=10, step=1,
+                    label="Target FPS (downsample from video FPS)",
+                )
                 sam2_run_btn = gr.Button("Run SAM2 Segmentation", variant="primary")
 
             with gr.Column(scale=2):
@@ -240,7 +248,7 @@ class WheatVisionApp:
                 sam2_video, sam2_enable_preprocess, sam2_enable_postprocess,
                 sam2_hsv_h_low, sam2_hsv_s_low, sam2_hsv_v_low,
                 sam2_hsv_h_high, sam2_hsv_s_high, sam2_hsv_v_high,
-                sam2_min_aspect, sam2_max_aspect, sam2_max_frames,
+                sam2_min_aspect, sam2_max_aspect, sam2_max_frames, sam2_target_fps,
             ],
             outputs=[sam2_status, sam2_metrics, sam2_preprocess_gallery, sam2_result_gallery],
         )
@@ -294,6 +302,7 @@ class WheatVisionApp:
         h_high: int, s_high: int, v_high: int,
         min_aspect: float, max_aspect: float,
         max_frames: int,
+        target_fps: float,
     ) -> Tuple[str, str, List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]]]:
         """Run SAM pipeline and return results for display."""
         try:
@@ -323,7 +332,7 @@ class WheatVisionApp:
                 )
 
             frames, preprocess_results, seg_results, metrics = self._sam_pipeline.process_video(
-                video_path, max_frames=int(max_frames)
+                video_path, max_frames=int(max_frames), target_fps=float(target_fps)
             )
 
             self._sam_results = (frames, preprocess_results, seg_results, metrics)
@@ -351,6 +360,7 @@ class WheatVisionApp:
         h_high: int, s_high: int, v_high: int,
         min_aspect: float, max_aspect: float,
         max_frames: int,
+        target_fps: float,
     ) -> Tuple[str, str, List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]]]:
         """Run SAM2 pipeline and return results for display."""
         try:
@@ -380,7 +390,7 @@ class WheatVisionApp:
                 )
 
             frames, preprocess_results, seg_results, metrics = self._sam2_pipeline.process_video(
-                video_path, max_frames=int(max_frames)
+                video_path, max_frames=int(max_frames), target_fps=float(target_fps)
             )
 
             self._sam2_results = (frames, preprocess_results, seg_results, metrics)
