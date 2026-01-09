@@ -313,52 +313,57 @@ class WheatVisionApp:
                 )
                 upload_btn = gr.Button("Save to Ground Truth Folder")
                 upload_status = gr.Textbox(label="Upload Status", interactive=False)
-
-            with gr.Column(scale=2):
-                gr.Markdown("### Ground Truth Evaluation")
-                gr.Markdown(
-                    "Run SAM and SAM2 segmentation first, then calculate metrics "
-                    "comparing the exported masks against ground truth."
-                )
                 
                 calculate_metrics_btn = gr.Button(
-                    "Calculate Metrics vs Ground Truth",
+                    "🔍 Calculate Metrics vs Ground Truth",
                     variant="primary",
                 )
+
+            with gr.Column(scale=3):
+                gr.Markdown("### 📊 Comparison Summary")
                 
-                metrics_output = gr.Textbox(
-                    label="Evaluation Results",
-                    lines=25,
-                    interactive=False,
+                # Summary table at the top
+                summary_html = gr.HTML(
+                    label="Summary Comparison",
+                    value="<p><i>Run segmentation and click 'Calculate Metrics' to see comparison.</i></p>",
+                )
+                
+                gr.Markdown("---")
+                gr.Markdown("### 📋 Per-Frame Detailed Metrics")
+                
+                metrics_table = gr.Dataframe(
+                    headers=["Frame", "Model", "Masks", "Avg Size (px)", "Coverage %", "IoU", "Dice", "Precision", "Recall"],
+                    label="Per-Frame Metrics",
+                    wrap=True,
                 )
 
         gr.Markdown("---")
-        gr.Markdown("### Visual Comparison Overlays")
-        gr.Markdown("🟢 Green = Prediction | 🔴 Red = Ground Truth | 🟡 Yellow = Overlap")
+        gr.Markdown("### 🎨 Visual Comparison Overlays")
+        gr.Markdown("🟢 **Green** = Prediction only (FP) | 🔴 **Red** = Ground Truth only (FN) | 🟡 **Yellow** = Overlap (TP)")
         
         with gr.Row():
             with gr.Column():
                 gr.Markdown("#### Ground Truth Masks")
                 gt_gallery = gr.Gallery(
                     label="Ground Truth",
-                    columns=4,
-                    height=250,
+                    columns=6,
+                    height=200,
                 )
             
         with gr.Row():
             with gr.Column():
                 gr.Markdown("#### SAM vs Ground Truth")
                 sam_overlay_gallery = gr.Gallery(
-                    label="SAM Overlay (Green=SAM, Red=GT, Yellow=Overlap)",
-                    columns=4,
-                    height=250,
+                    label="SAM Overlay",
+                    columns=6,
+                    height=200,
                 )
             with gr.Column():
                 gr.Markdown("#### SAM2 vs Ground Truth")
                 sam2_overlay_gallery = gr.Gallery(
-                    label="SAM2 Overlay (Green=SAM2, Red=GT, Yellow=Overlap)",
-                    columns=4,
-                    height=250,
+                    label="SAM2 Overlay",
+                    columns=6,
+                    height=200,
                 )
 
         # Event handlers
@@ -375,7 +380,7 @@ class WheatVisionApp:
         
         calculate_metrics_btn.click(
             fn=self._calculate_ground_truth_metrics,
-            outputs=[metrics_output, gt_gallery, sam_overlay_gallery, sam2_overlay_gallery],
+            outputs=[summary_html, metrics_table, gt_gallery, sam_overlay_gallery, sam2_overlay_gallery],
         )
 
     def _get_ground_truth_status(self) -> str:
@@ -414,18 +419,18 @@ class WheatVisionApp:
 
     def _calculate_ground_truth_metrics(
         self,
-    ) -> Tuple[str, List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]]]:
+    ) -> Tuple[str, List[List], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]]]:
         """Calculate metrics comparing SAM/SAM2 results to ground truth."""
         gt_dir = Path("groundtruth")
         
+        empty_html = "<p style='color: red;'>Error: Ground truth not available.</p>"
         if not gt_dir.exists():
-            return "Error: Ground truth folder not found.", [], [], []
+            return empty_html, [], [], [], []
         
         gt_files = sorted(gt_dir.glob("*.png"))
         if not gt_files:
-            return "Error: No ground truth PNG files found.", [], [], []
+            return "<p style='color: red;'>Error: No ground truth PNG files found.</p>", [], [], [], []
         
-        # Load ground truth images
         gt_images = []
         for gt_file in gt_files:
             img = cv2.imread(str(gt_file))
@@ -433,89 +438,82 @@ class WheatVisionApp:
                 gt_images.append((gt_file.name, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
         
         if not gt_images:
-            return "Error: Could not load any ground truth images.", [], [], []
+            return "<p style='color: red;'>Error: Could not load any ground truth images.</p>", [], [], [], []
         
-        # Create gallery images for ground truth
         gallery_images = [(img, name) for name, img in gt_images]
         
-        # Initialize accuracy metrics calculator
         accuracy_metrics = AccuracyMetrics()
         
-        results_text = "# Ground Truth Evaluation\n\n"
-        results_text += f"Found {len(gt_images)} ground truth masks.\n\n"
-        
-        # Initialize overlay galleries
+        all_rows = []
+        sam_summary = None
+        sam2_summary = None
         sam_overlays = []
         sam2_overlays = []
         
-        # Compare SAM results if available
         if self._sam_results is not None:
-            text, overlays = self._compare_with_ground_truth(
+            sam_summary, sam_rows, sam_overlays = self._compare_with_ground_truth_extended(
                 "SAM", self._sam_results, gt_images, accuracy_metrics
             )
-            results_text += text
-            sam_overlays = overlays
-        else:
-            results_text += "## SAM Results\nNo SAM segmentation results available. Run SAM first.\n\n"
+            all_rows.extend(sam_rows)
         
-        # Compare SAM2 results if available
         if self._sam2_results is not None:
-            text, overlays = self._compare_with_ground_truth(
+            sam2_summary, sam2_rows, sam2_overlays = self._compare_with_ground_truth_extended(
                 "SAM2", self._sam2_results, gt_images, accuracy_metrics
             )
-            results_text += text
-            sam2_overlays = overlays
-        else:
-            results_text += "## SAM2 Results\nNo SAM2 segmentation results available. Run SAM2 first.\n\n"
+            all_rows.extend(sam2_rows)
         
-        return results_text, gallery_images, sam_overlays, sam2_overlays
+        html = self._build_summary_html(len(gt_images), sam_summary, sam2_summary)
+        
+        return html, all_rows, gallery_images, sam_overlays, sam2_overlays
 
-    def _compare_with_ground_truth(
+    def _compare_with_ground_truth_extended(
         self,
         model_name: str,
         results: Tuple[List[FrameData], List[PreprocessingResult], List[SegmentationResult], MetricsReport],
         gt_images: List[Tuple[str, np.ndarray]],
         accuracy_metrics: AccuracyMetrics,
-    ) -> Tuple[str, List[Tuple[np.ndarray, str]]]:
-        """Compare segmentation results with ground truth masks."""
+    ) -> Tuple[dict, List[List], List[Tuple[np.ndarray, str]]]:
+        """Compare segmentation results with ground truth masks, returning extended metrics."""
         frames, _, seg_results, _ = results
         
-        text = f"## {model_name} vs Ground Truth\n\n"
-        
-        num_frames = len(seg_results)
-        num_gt = len(gt_images)
-        
-        if num_frames != num_gt:
-            text += f"⚠️ Warning: Frame count mismatch ({num_frames} frames vs {num_gt} ground truth masks)\n"
-            text += "Comparing up to the minimum count.\n\n"
-        
-        comparisons = min(num_frames, num_gt)
+        comparisons = min(len(seg_results), len(gt_images))
         
         all_metrics = []
         all_mask_counts = []
+        all_avg_sizes = []
+        all_coverages = []
+        rows = []
         overlay_images = []
         
         for i in range(comparisons):
             seg_result = seg_results[i]
             gt_name, gt_img = gt_images[i]
             
-            # Count masks
+            # Count masks and calculate average size
             mask_count = len(seg_result.masks)
             all_mask_counts.append(mask_count)
             
-            # Combine prediction masks into binary mask
+            total_mask_pixels = 0
             if seg_result.masks:
                 pred_mask = np.zeros_like(seg_result.masks[0], dtype=np.uint8)
                 for mask in seg_result.masks:
+                    mask_pixels = np.sum(mask > 0)
+                    total_mask_pixels += mask_pixels
                     pred_mask[mask > 0] = 255
+                avg_size = total_mask_pixels / mask_count if mask_count > 0 else 0
             else:
-                # No masks - create empty prediction
                 if frames:
                     pred_mask = np.zeros((frames[0].height, frames[0].width), dtype=np.uint8)
                 else:
                     pred_mask = np.zeros((gt_img.shape[0], gt_img.shape[1]), dtype=np.uint8)
+                avg_size = 0
             
-            # Create overlay image: Green=Prediction, Red=GT, Yellow=Overlap
+            all_avg_sizes.append(avg_size)
+            
+            total_pixels = pred_mask.shape[0] * pred_mask.shape[1]
+            coverage_pct = (total_mask_pixels / total_pixels) * 100 if total_pixels > 0 else 0
+            all_coverages.append(coverage_pct)
+            
             overlay = self._create_comparison_overlay(pred_mask, gt_img)
             overlay_images.append((overlay, f"Frame {i}: {mask_count} masks"))
             
@@ -523,30 +521,116 @@ class WheatVisionApp:
                 metrics = accuracy_metrics.calculate_against_ground_truth(pred_mask, gt_img)
                 all_metrics.append(metrics)
                 
-                text += f"Frame {i} ({gt_name}) - {mask_count} masks:\n"
-                text += f"  IoU: {metrics['iou']:.4f} | Dice: {metrics['dice']:.4f} | "
-                text += f"Precision: {metrics['precision']:.4f} | Recall: {metrics['recall']:.4f}\n"
-            except ValueError as e:
-                text += f"Frame {i} ({gt_name}): Error - {str(e)}\n"
+                rows.append([
+                    f"Frame {i}",
+                    model_name,
+                    mask_count,
+                    f"{avg_size:.0f}",
+                    f"{coverage_pct:.1f}",
+                    f"{metrics['iou']:.4f}",
+                    f"{metrics['dice']:.4f}",
+                    f"{metrics['precision']:.4f}",
+                    f"{metrics['recall']:.4f}",
+                ])
+            except ValueError:
+                rows.append([f"Frame {i}", model_name, mask_count, f"{avg_size:.0f}", f"{coverage_pct:.1f}", "Error", "Error", "Error", "Error"])
         
-        # Calculate averages
+        summary = {}
         if all_metrics:
-            avg_iou = np.mean([m['iou'] for m in all_metrics])
-            avg_dice = np.mean([m['dice'] for m in all_metrics])
-            avg_precision = np.mean([m['precision'] for m in all_metrics])
-            avg_recall = np.mean([m['recall'] for m in all_metrics])
-            avg_mask_count = np.mean(all_mask_counts)
-            total_masks = sum(all_mask_counts)
-            
-            text += f"\n### {model_name} Summary\n"
-            text += f"  **Total Masks Found**: {total_masks}\n"
-            text += f"  **Average Masks/Frame**: {avg_mask_count:.1f}\n"
-            text += f"  **Average IoU**: {avg_iou:.4f}\n"
-            text += f"  **Average Dice**: {avg_dice:.4f}\n"
-            text += f"  **Average Precision**: {avg_precision:.4f}\n"
-            text += f"  **Average Recall**: {avg_recall:.4f}\n\n"
+            summary = {
+                "total_masks": sum(all_mask_counts),
+                "avg_masks_per_frame": np.mean(all_mask_counts),
+                "avg_object_size": np.mean(all_avg_sizes),
+                "avg_coverage": np.mean(all_coverages),
+                "avg_iou": np.mean([m['iou'] for m in all_metrics]),
+                "avg_dice": np.mean([m['dice'] for m in all_metrics]),
+                "avg_precision": np.mean([m['precision'] for m in all_metrics]),
+                "avg_recall": np.mean([m['recall'] for m in all_metrics]),
+            }
         
-        return text, overlay_images
+        return summary, rows, overlay_images
+
+    def _build_summary_html(
+        self,
+        num_gt_frames: int,
+        sam_summary: Optional[dict],
+        sam2_summary: Optional[dict],
+    ) -> str:
+        """Build HTML summary comparison table."""
+        html = f"""
+        <div style="font-family: Arial, sans-serif;">
+            <h3>📊 Evaluation Summary ({num_gt_frames} frames)</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Metric</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">SAM</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">SAM2</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+        
+        def get_val(summary, key, fmt=".2f"):
+            if summary is None:
+                return "<i>N/A</i>"
+            return f"{summary.get(key, 0):{fmt}}"
+        
+        def get_val_int(summary, key):
+            if summary is None:
+                return "<i>N/A</i>"
+            return f"{int(summary.get(key, 0))}"
+        
+        # Highlight best values
+        def compare_higher(s1, s2, key):
+            if s1 is None and s2 is None:
+                return "", ""
+            if s1 is None:
+                return "", "background-color: #d4edda;"
+            if s2 is None:
+                return "background-color: #d4edda;", ""
+            if s1.get(key, 0) > s2.get(key, 0):
+                return "background-color: #d4edda;", ""
+            elif s2.get(key, 0) > s1.get(key, 0):
+                return "", "background-color: #d4edda;"
+            return "", ""
+        
+        metrics_config = [
+            ("🔢 Total Objects Found", "total_masks", "int", True),
+            ("📊 Avg Objects/Frame", "avg_masks_per_frame", ".1f", False),
+            ("📐 Avg Object Size (px)", "avg_object_size", ".0f", False),
+            ("📏 Avg Coverage (%)", "avg_coverage", ".1f", False),
+            ("🎯 Avg IoU", "avg_iou", ".4f", True),
+            ("🎯 Avg Dice", "avg_dice", ".4f", True),
+            ("✅ Avg Precision", "avg_precision", ".4f", True),
+            ("📥 Avg Recall", "avg_recall", ".4f", True),
+        ]
+        
+        for label, key, fmt, highlight in metrics_config:
+            style1, style2 = compare_higher(sam_summary, sam2_summary, key) if highlight else ("", "")
+            if fmt == "int":
+                val1, val2 = get_val_int(sam_summary, key), get_val_int(sam2_summary, key)
+            else:
+                val1, val2 = get_val(sam_summary, key, fmt), get_val(sam2_summary, key, fmt)
+            
+            html += f"""
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd;"><strong>{label}</strong></td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {style1}">{val1}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {style2}">{val2}</td>
+                    </tr>
+            """
+        
+        html += """
+                </tbody>
+            </table>
+            <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                <span style="background-color: #d4edda; padding: 2px 6px;">Green</span> = Better value
+            </p>
+        </div>
+        """
+        
+        return html
 
     def _create_comparison_overlay(
         self,
@@ -562,28 +646,22 @@ class WheatVisionApp:
         - Yellow: Overlap (true positive)
         - Black: Background (true negative)
         """
-        # Convert prediction to binary
         pred_binary = pred_mask > 0
         
-        # Convert ground truth to binary (any non-black pixel is foreground)
         if len(gt_img.shape) == 3:
             gt_binary = np.any(gt_img > 0, axis=2)
         else:
             gt_binary = gt_img > 0
         
-        # Create RGB overlay
         height, width = pred_binary.shape
         overlay = np.zeros((height, width, 3), dtype=np.uint8)
         
-        # Overlap (yellow) - both prediction and ground truth
         overlap = np.logical_and(pred_binary, gt_binary)
         overlay[overlap] = [255, 255, 0]  # Yellow
         
-        # Prediction only (green) - false positive
         pred_only = np.logical_and(pred_binary, ~gt_binary)
         overlay[pred_only] = [0, 255, 0]  # Green
         
-        # Ground truth only (red) - false negative
         gt_only = np.logical_and(~pred_binary, gt_binary)
         overlay[gt_only] = [255, 0, 0]  # Red
         
