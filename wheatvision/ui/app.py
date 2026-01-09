@@ -111,7 +111,7 @@ class WheatVisionApp:
 
                 gr.Markdown("### Processing")
                 sam_max_frames = gr.Slider(
-                    1, 100, value=10, step=1,
+                    1, 100, value=12, step=1,
                     label="Max Frames to Process",
                 )
                 sam_run_btn = gr.Button("Run SAM Segmentation", variant="primary")
