@@ -20,8 +20,7 @@ class FrameLoader:
     def __init__(
         self,
         max_frames: Optional[int] = None,
-        frame_skip: int = 1,
-        target_fps: Optional[float] = None,
+        target_fps: float = 1.0,
     ) -> None:
         """
         Initialize the frame loader.
@@ -29,12 +28,11 @@ class FrameLoader:
         Args:
             max_frames: Optional limit on number of frames to load.
                         If None, loads all frames.
-            frame_skip: Process every Nth frame (1 = all frames, 2 = every other frame, etc.)
-            target_fps: If set, automatically calculate frame_skip to achieve this target FPS.
-                        Overrides frame_skip if set.
+            target_fps: Target frames per second to extract from video.
+                        Defaults to 1.0 (1 frame per second), so an 11-second
+                        video yields 11 frames.
         """
         self._max_frames = max_frames
-        self._frame_skip = max(1, frame_skip)
         self._target_fps = target_fps
 
     def load_video(self, video_path: Path | str) -> List[FrameData]:
@@ -81,10 +79,8 @@ class FrameLoader:
 
         video_fps = cap.get(cv2.CAP_PROP_FPS)
         
-        if self._target_fps and video_fps > 0:
-            skip = max(1, int(round(video_fps / self._target_fps)))
-        else:
-            skip = self._frame_skip
+        # Calculate frame skip to achieve target FPS
+        skip = max(1, int(round(video_fps / self._target_fps))) if video_fps > 0 else 1
         
         source_frame_index = 0
         output_frame_index = 0

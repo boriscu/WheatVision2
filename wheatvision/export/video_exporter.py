@@ -20,14 +20,15 @@ class VideoExporter(BaseExporter):
 
     def __init__(
         self,
-        fps: float = 10.0,
+        fps: float = 1.0,
         codec: str = "mp4v",
     ) -> None:
         """
         Initialize the video exporter.
         
         Args:
-            fps: Frames per second for output video (default 10 to match typical processing).
+            fps: Frames per second for output video. Defaults to 1.0 to match
+                 the default 1 FPS frame extraction, so each frame = 1 second.
             codec: FourCC codec for video encoding.
         """
         self._fps = fps
