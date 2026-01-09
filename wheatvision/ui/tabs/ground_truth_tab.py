@@ -170,6 +170,9 @@ class GroundTruthTab:
         
         accuracy_metrics = AccuracyMetrics()
         
+        # Calculate ground truth statistics
+        gt_summary = self._calculate_gt_stats(gt_images)
+        
         all_rows = []
         sam_summary = None
         sam2_summary = None
@@ -188,9 +191,43 @@ class GroundTruthTab:
             )
             all_rows.extend(sam2_rows)
         
-        html = self._build_summary_html(len(gt_images), sam_summary, sam2_summary)
+        html = self._build_summary_html(len(gt_images), gt_summary, sam_summary, sam2_summary)
         
         return html, all_rows, gallery_images, sam_overlays, sam2_overlays
+
+    def _calculate_gt_stats(self, gt_images: List[Tuple[str, np.ndarray]]) -> dict:
+        """Calculate statistics from ground truth images."""
+        total_objects = 0
+        total_object_pixels = 0
+        total_pixels = 0
+        all_object_counts = []
+        
+        for gt_name, gt_img in gt_images:
+            # Convert to binary mask
+            if len(gt_img.shape) == 3:
+                gt_binary = np.any(gt_img > 0, axis=2).astype(np.uint8)
+            else:
+                gt_binary = (gt_img > 0).astype(np.uint8)
+            
+            # Count connected components (objects) in GT
+            num_labels, _, stats, _ = cv2.connectedComponentsWithStats(gt_binary, connectivity=8)
+            num_objects = num_labels - 1  # Subtract background
+            total_objects += num_objects
+            all_object_counts.append(num_objects)
+            
+            # Calculate pixels
+            object_pixels = np.sum(gt_binary > 0)
+            total_object_pixels += object_pixels
+            total_pixels += gt_binary.shape[0] * gt_binary.shape[1]
+        
+        avg_size = total_object_pixels / total_objects if total_objects > 0 else 0
+        
+        return {
+            "total_masks": total_objects,
+            "avg_masks_per_frame": np.mean(all_object_counts) if all_object_counts else 0,
+            "avg_object_size": avg_size,
+            "avg_coverage": (total_object_pixels / total_pixels) * 100 if total_pixels > 0 else 0,
+        }
 
     def _compare_with_ground_truth_extended(
         self,
@@ -278,10 +315,11 @@ class GroundTruthTab:
     def _build_summary_html(
         self,
         num_gt_frames: int,
+        gt_summary: dict,
         sam_summary: Optional[dict],
         sam2_summary: Optional[dict],
     ) -> str:
-        """Build HTML summary comparison table."""
+        """Build HTML summary comparison table with GT, SAM, and SAM2 columns."""
         html = f"""
         <div style="font-family: Arial, sans-serif;">
             <h3>📊 Evaluation Summary ({num_gt_frames} frames)</h3>
@@ -289,6 +327,7 @@ class GroundTruthTab:
                 <thead>
                     <tr style="background-color: #f0f0f0;">
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Metric</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: center; background-color: #fff3cd;">Ground Truth</th>
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">SAM</th>
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">SAM2</th>
                     </tr>
@@ -299,49 +338,65 @@ class GroundTruthTab:
         def get_val(summary, key, fmt=".2f"):
             if summary is None:
                 return "<i>N/A</i>"
-            return f"{summary.get(key, 0):{fmt}}"
+            val = summary.get(key)
+            if val is None:
+                return "<i>N/A</i>"
+            return f"{val:{fmt}}"
         
         def get_val_int(summary, key):
             if summary is None:
                 return "<i>N/A</i>"
-            return f"{int(summary.get(key, 0))}"
+            val = summary.get(key)
+            if val is None:
+                return "<i>N/A</i>"
+            return f"{int(val)}"
         
-        def compare_higher(s1, s2, key):
-            if s1 is None and s2 is None:
-                return "", ""
-            if s1 is None:
-                return "", "background-color: #d4edda;"
-            if s2 is None:
-                return "background-color: #d4edda;", ""
-            if s1.get(key, 0) > s2.get(key, 0):
-                return "background-color: #d4edda;", ""
-            elif s2.get(key, 0) > s1.get(key, 0):
-                return "", "background-color: #d4edda;"
-            return "", ""
+        def compare_to_gt(pred_summary, gt_summary, key, higher_is_better=True):
+            """Compare prediction to ground truth and return style."""
+            if pred_summary is None or gt_summary is None:
+                return ""
+            pred_val = pred_summary.get(key, 0)
+            gt_val = gt_summary.get(key, 0)
+            if gt_val == 0:
+                return ""
+            diff_pct = abs(pred_val - gt_val) / gt_val * 100
+            if diff_pct < 10:  # Within 10% of GT
+                return "background-color: #d4edda;"  # Green - good match
+            elif diff_pct < 25:  # Within 25%
+                return "background-color: #fff3cd;"  # Yellow - close
+            return ""  # No highlight for large differences
         
         metrics_config = [
             ("🔢 Total Objects Found", "total_masks", "int", True),
-            ("📊 Avg Objects/Frame", "avg_masks_per_frame", ".1f", False),
-            ("📐 Avg Object Size (px)", "avg_object_size", ".0f", False),
-            ("📏 Avg Coverage (%)", "avg_coverage", ".1f", False),
-            ("🎯 Avg IoU", "avg_iou", ".4f", True),
-            ("🎯 Avg Dice", "avg_dice", ".4f", True),
-            ("✅ Avg Precision", "avg_precision", ".4f", True),
-            ("📥 Avg Recall", "avg_recall", ".4f", True),
+            ("📊 Avg Objects/Frame", "avg_masks_per_frame", ".1f", True),
+            ("📐 Avg Object Size (px)", "avg_object_size", ".0f", True),
+            ("📏 Avg Coverage (%)", "avg_coverage", ".1f", True),
+            ("🎯 Avg IoU", "avg_iou", ".4f", False),
+            ("🎯 Avg Dice", "avg_dice", ".4f", False),
+            ("✅ Avg Precision", "avg_precision", ".4f", False),
+            ("📥 Avg Recall", "avg_recall", ".4f", False),
         ]
         
-        for label, key, fmt, highlight in metrics_config:
-            style1, style2 = compare_higher(sam_summary, sam2_summary, key) if highlight else ("", "")
+        for label, key, fmt, has_gt in metrics_config:
             if fmt == "int":
-                val1, val2 = get_val_int(sam_summary, key), get_val_int(sam2_summary, key)
+                gt_val = get_val_int(gt_summary, key) if has_gt else "<i>—</i>"
+                sam_val = get_val_int(sam_summary, key)
+                sam2_val = get_val_int(sam2_summary, key)
             else:
-                val1, val2 = get_val(sam_summary, key, fmt), get_val(sam2_summary, key, fmt)
+                gt_val = get_val(gt_summary, key, fmt) if has_gt else "<i>—</i>"
+                sam_val = get_val(sam_summary, key, fmt)
+                sam2_val = get_val(sam2_summary, key, fmt)
+            
+            # Highlight predictions that are close to GT
+            sam_style = compare_to_gt(sam_summary, gt_summary, key) if has_gt else ""
+            sam2_style = compare_to_gt(sam2_summary, gt_summary, key) if has_gt else ""
             
             html += f"""
                     <tr>
                         <td style="padding: 8px; border: 1px solid #ddd;"><strong>{label}</strong></td>
-                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {style1}">{val1}</td>
-                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {style2}">{val2}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; background-color: #fff3cd;">{gt_val}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {sam_style}">{sam_val}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {sam2_style}">{sam2_val}</td>
                     </tr>
             """
         
@@ -349,7 +404,8 @@ class GroundTruthTab:
                 </tbody>
             </table>
             <p style="font-size: 12px; color: #666; margin-top: 10px;">
-                <span style="background-color: #d4edda; padding: 2px 6px;">Green</span> = Better value
+                <span style="background-color: #d4edda; padding: 2px 6px;">Green</span> = Within 10% of GT &nbsp;
+                <span style="background-color: #fff3cd; padding: 2px 6px;">Yellow</span> = Ground Truth / Within 25%
             </p>
         </div>
         """
