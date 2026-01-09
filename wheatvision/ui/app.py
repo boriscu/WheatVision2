@@ -328,15 +328,37 @@ class WheatVisionApp:
                 
                 metrics_output = gr.Textbox(
                     label="Evaluation Results",
-                    lines=20,
+                    lines=25,
                     interactive=False,
                 )
-                
-                gr.Markdown("### Visual Comparison")
+
+        gr.Markdown("---")
+        gr.Markdown("### Visual Comparison Overlays")
+        gr.Markdown("🟢 Green = Prediction | 🔴 Red = Ground Truth | 🟡 Yellow = Overlap")
+        
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("#### Ground Truth Masks")
                 gt_gallery = gr.Gallery(
-                    label="Ground Truth Masks",
-                    columns=5,
-                    height=200,
+                    label="Ground Truth",
+                    columns=4,
+                    height=250,
+                )
+            
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("#### SAM vs Ground Truth")
+                sam_overlay_gallery = gr.Gallery(
+                    label="SAM Overlay (Green=SAM, Red=GT, Yellow=Overlap)",
+                    columns=4,
+                    height=250,
+                )
+            with gr.Column():
+                gr.Markdown("#### SAM2 vs Ground Truth")
+                sam2_overlay_gallery = gr.Gallery(
+                    label="SAM2 Overlay (Green=SAM2, Red=GT, Yellow=Overlap)",
+                    columns=4,
+                    height=250,
                 )
 
         # Event handlers
@@ -353,7 +375,7 @@ class WheatVisionApp:
         
         calculate_metrics_btn.click(
             fn=self._calculate_ground_truth_metrics,
-            outputs=[metrics_output, gt_gallery],
+            outputs=[metrics_output, gt_gallery, sam_overlay_gallery, sam2_overlay_gallery],
         )
 
     def _get_ground_truth_status(self) -> str:
@@ -392,16 +414,16 @@ class WheatVisionApp:
 
     def _calculate_ground_truth_metrics(
         self,
-    ) -> Tuple[str, List[Tuple[np.ndarray, str]]]:
+    ) -> Tuple[str, List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]]]:
         """Calculate metrics comparing SAM/SAM2 results to ground truth."""
         gt_dir = Path("groundtruth")
         
         if not gt_dir.exists():
-            return "Error: Ground truth folder not found.", []
+            return "Error: Ground truth folder not found.", [], [], []
         
         gt_files = sorted(gt_dir.glob("*.png"))
         if not gt_files:
-            return "Error: No ground truth PNG files found.", []
+            return "Error: No ground truth PNG files found.", [], [], []
         
         # Load ground truth images
         gt_images = []
@@ -411,34 +433,42 @@ class WheatVisionApp:
                 gt_images.append((gt_file.name, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
         
         if not gt_images:
-            return "Error: Could not load any ground truth images.", []
+            return "Error: Could not load any ground truth images.", [], [], []
         
-        # Create gallery images
+        # Create gallery images for ground truth
         gallery_images = [(img, name) for name, img in gt_images]
         
         # Initialize accuracy metrics calculator
         accuracy_metrics = AccuracyMetrics()
         
-        results_text = f"# Ground Truth Evaluation\n\n"
+        results_text = "# Ground Truth Evaluation\n\n"
         results_text += f"Found {len(gt_images)} ground truth masks.\n\n"
+        
+        # Initialize overlay galleries
+        sam_overlays = []
+        sam2_overlays = []
         
         # Compare SAM results if available
         if self._sam_results is not None:
-            results_text += self._compare_with_ground_truth(
+            text, overlays = self._compare_with_ground_truth(
                 "SAM", self._sam_results, gt_images, accuracy_metrics
             )
+            results_text += text
+            sam_overlays = overlays
         else:
             results_text += "## SAM Results\nNo SAM segmentation results available. Run SAM first.\n\n"
         
         # Compare SAM2 results if available
         if self._sam2_results is not None:
-            results_text += self._compare_with_ground_truth(
+            text, overlays = self._compare_with_ground_truth(
                 "SAM2", self._sam2_results, gt_images, accuracy_metrics
             )
+            results_text += text
+            sam2_overlays = overlays
         else:
             results_text += "## SAM2 Results\nNo SAM2 segmentation results available. Run SAM2 first.\n\n"
         
-        return results_text, gallery_images
+        return results_text, gallery_images, sam_overlays, sam2_overlays
 
     def _compare_with_ground_truth(
         self,
@@ -446,7 +476,7 @@ class WheatVisionApp:
         results: Tuple[List[FrameData], List[PreprocessingResult], List[SegmentationResult], MetricsReport],
         gt_images: List[Tuple[str, np.ndarray]],
         accuracy_metrics: AccuracyMetrics,
-    ) -> str:
+    ) -> Tuple[str, List[Tuple[np.ndarray, str]]]:
         """Compare segmentation results with ground truth masks."""
         frames, _, seg_results, _ = results
         
@@ -462,10 +492,16 @@ class WheatVisionApp:
         comparisons = min(num_frames, num_gt)
         
         all_metrics = []
+        all_mask_counts = []
+        overlay_images = []
         
         for i in range(comparisons):
             seg_result = seg_results[i]
             gt_name, gt_img = gt_images[i]
+            
+            # Count masks
+            mask_count = len(seg_result.masks)
+            all_mask_counts.append(mask_count)
             
             # Combine prediction masks into binary mask
             if seg_result.masks:
@@ -479,11 +515,15 @@ class WheatVisionApp:
                 else:
                     pred_mask = np.zeros((gt_img.shape[0], gt_img.shape[1]), dtype=np.uint8)
             
+            # Create overlay image: Green=Prediction, Red=GT, Yellow=Overlap
+            overlay = self._create_comparison_overlay(pred_mask, gt_img)
+            overlay_images.append((overlay, f"Frame {i}: {mask_count} masks"))
+            
             try:
                 metrics = accuracy_metrics.calculate_against_ground_truth(pred_mask, gt_img)
                 all_metrics.append(metrics)
                 
-                text += f"Frame {i} ({gt_name}):\n"
+                text += f"Frame {i} ({gt_name}) - {mask_count} masks:\n"
                 text += f"  IoU: {metrics['iou']:.4f} | Dice: {metrics['dice']:.4f} | "
                 text += f"Precision: {metrics['precision']:.4f} | Recall: {metrics['recall']:.4f}\n"
             except ValueError as e:
@@ -495,14 +535,59 @@ class WheatVisionApp:
             avg_dice = np.mean([m['dice'] for m in all_metrics])
             avg_precision = np.mean([m['precision'] for m in all_metrics])
             avg_recall = np.mean([m['recall'] for m in all_metrics])
+            avg_mask_count = np.mean(all_mask_counts)
+            total_masks = sum(all_mask_counts)
             
-            text += f"\n### {model_name} Average Metrics\n"
-            text += f"  **IoU**: {avg_iou:.4f}\n"
-            text += f"  **Dice**: {avg_dice:.4f}\n"
-            text += f"  **Precision**: {avg_precision:.4f}\n"
-            text += f"  **Recall**: {avg_recall:.4f}\n\n"
+            text += f"\n### {model_name} Summary\n"
+            text += f"  **Total Masks Found**: {total_masks}\n"
+            text += f"  **Average Masks/Frame**: {avg_mask_count:.1f}\n"
+            text += f"  **Average IoU**: {avg_iou:.4f}\n"
+            text += f"  **Average Dice**: {avg_dice:.4f}\n"
+            text += f"  **Average Precision**: {avg_precision:.4f}\n"
+            text += f"  **Average Recall**: {avg_recall:.4f}\n\n"
         
-        return text
+        return text, overlay_images
+
+    def _create_comparison_overlay(
+        self,
+        pred_mask: np.ndarray,
+        gt_img: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Create overlay showing prediction vs ground truth.
+        
+        Colors:
+        - Green: Prediction only (false positive)
+        - Red: Ground truth only (false negative)
+        - Yellow: Overlap (true positive)
+        - Black: Background (true negative)
+        """
+        # Convert prediction to binary
+        pred_binary = pred_mask > 0
+        
+        # Convert ground truth to binary (any non-black pixel is foreground)
+        if len(gt_img.shape) == 3:
+            gt_binary = np.any(gt_img > 0, axis=2)
+        else:
+            gt_binary = gt_img > 0
+        
+        # Create RGB overlay
+        height, width = pred_binary.shape
+        overlay = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        # Overlap (yellow) - both prediction and ground truth
+        overlap = np.logical_and(pred_binary, gt_binary)
+        overlay[overlap] = [255, 255, 0]  # Yellow
+        
+        # Prediction only (green) - false positive
+        pred_only = np.logical_and(pred_binary, ~gt_binary)
+        overlay[pred_only] = [0, 255, 0]  # Green
+        
+        # Ground truth only (red) - false negative
+        gt_only = np.logical_and(~pred_binary, gt_binary)
+        overlay[gt_only] = [255, 0, 0]  # Red
+        
+        return overlay
 
     def _run_sam_pipeline(
         self,
