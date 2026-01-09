@@ -82,9 +82,10 @@ class MaskExporter(BaseExporter):
         base_path: Path,
     ) -> Path:
         """
-        Export masks as PNG images.
+        Export masks as a binary PNG image.
         
-        Creates a combined label map where each mask has a unique value.
+        Creates a combined black/white mask where all segmented areas are white (255)
+        and background is black (0).
         
         Args:
             result: Segmentation result.
@@ -96,14 +97,14 @@ class MaskExporter(BaseExporter):
         output_path = base_path.with_suffix(".png")
 
         if not result.masks:
-            label_map = np.zeros((1, 1), dtype=np.uint8)
+            binary_mask = np.zeros((1, 1), dtype=np.uint8)
         else:
             combined = np.zeros_like(result.masks[0], dtype=np.uint8)
-            for i, mask in enumerate(result.masks):
-                combined[mask > 0] = i + 1
-            label_map = combined
+            for mask in result.masks:
+                combined[mask > 0] = 255 
+            binary_mask = combined
 
-        cv2.imwrite(str(output_path), label_map)
+        cv2.imwrite(str(output_path), binary_mask)
         return output_path
 
     def _export_as_npy(

@@ -481,19 +481,24 @@ class WheatVisionApp:
         self,
         results: List[SegmentationResult],
         prefix: str,
-    ) -> str:
-        """Export masks to temporary directory."""
+    ) -> List[str]:
+        """Export masks to exports directory."""
+        import shutil
+        
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / f"{prefix}_masks"
             paths = self._mask_exporter.export_batch(results, output_dir, ExportFormat.PNG)
             
-            import shutil
             export_dir = Path("exports") / f"{prefix}_masks"
             export_dir.mkdir(parents=True, exist_ok=True)
-            for p in paths:
-                shutil.copy(p, export_dir)
             
-            return str(export_dir)
+            exported_files = []
+            for p in paths:
+                dest = export_dir / Path(p).name
+                shutil.copy(p, dest)
+                exported_files.append(str(dest))
+            
+            return exported_files
 
     def _export_sam_video(self) -> Optional[str]:
         """Export SAM video."""
