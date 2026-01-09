@@ -2,6 +2,9 @@
 
 import logging
 import tempfile
+import shutil
+import zipfile
+
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -14,7 +17,7 @@ from wheatvision.config.models import FrameData, MetricsReport, PreprocessingRes
 from wheatvision.config.settings import get_ui_settings
 from wheatvision.export import MaskExporter, ReportExporter, VideoExporter
 from wheatvision.io import FrameLoader
-from wheatvision.metrics import MetricsCalculator
+from wheatvision.metrics import MetricsCalculator, AccuracyMetrics
 from wheatvision.pipeline import SegmentationPipeline
 from wheatvision.utils import setup_logging, get_logger
 
@@ -69,6 +72,9 @@ class WheatVisionApp:
 
                 with gr.Tab("Comparison"):
                     self._build_comparison_tab()
+
+                with gr.Tab("Ground Truth Evaluation"):
+                    self._build_ground_truth_tab()
 
         return app
 
@@ -285,6 +291,219 @@ class WheatVisionApp:
             outputs=[comparison_file],
         )
 
+    def _build_ground_truth_tab(self) -> None:
+        """Build the ground truth evaluation tab."""
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("### Ground Truth Management")
+                
+                gt_status = gr.Textbox(
+                    label="Ground Truth Status",
+                    value=self._get_ground_truth_status(),
+                    interactive=False,
+                    lines=3,
+                )
+                refresh_gt_btn = gr.Button("Refresh Ground Truth List")
+                
+                gr.Markdown("### Upload Ground Truth Masks")
+                gt_upload = gr.File(
+                    label="Upload PNG Masks",
+                    file_count="multiple",
+                    file_types=[".png"],
+                )
+                upload_btn = gr.Button("Save to Ground Truth Folder")
+                upload_status = gr.Textbox(label="Upload Status", interactive=False)
+
+            with gr.Column(scale=2):
+                gr.Markdown("### Ground Truth Evaluation")
+                gr.Markdown(
+                    "Run SAM and SAM2 segmentation first, then calculate metrics "
+                    "comparing the exported masks against ground truth."
+                )
+                
+                calculate_metrics_btn = gr.Button(
+                    "Calculate Metrics vs Ground Truth",
+                    variant="primary",
+                )
+                
+                metrics_output = gr.Textbox(
+                    label="Evaluation Results",
+                    lines=20,
+                    interactive=False,
+                )
+                
+                gr.Markdown("### Visual Comparison")
+                gt_gallery = gr.Gallery(
+                    label="Ground Truth Masks",
+                    columns=5,
+                    height=200,
+                )
+
+        # Event handlers
+        refresh_gt_btn.click(
+            fn=self._get_ground_truth_status,
+            outputs=[gt_status],
+        )
+        
+        upload_btn.click(
+            fn=self._upload_ground_truth,
+            inputs=[gt_upload],
+            outputs=[upload_status, gt_status],
+        )
+        
+        calculate_metrics_btn.click(
+            fn=self._calculate_ground_truth_metrics,
+            outputs=[metrics_output, gt_gallery],
+        )
+
+    def _get_ground_truth_status(self) -> str:
+        """Get status of ground truth folder."""
+        gt_dir = Path("groundtruth")
+        if not gt_dir.exists():
+            return "Ground truth folder not found. It will be created on first upload."
+        
+        png_files = sorted(gt_dir.glob("*.png"))
+        if not png_files:
+            return "Ground truth folder exists but contains no PNG files."
+        
+        return f"Found {len(png_files)} ground truth masks:\n" + "\n".join(
+            f"  - {f.name}" for f in png_files[:10]
+        ) + ("\n  ..." if len(png_files) > 10 else "")
+
+    def _upload_ground_truth(
+        self,
+        files: List[str],
+    ) -> Tuple[str, str]:
+        """Upload ground truth files to the groundtruth folder."""
+        if not files:
+            return "No files selected.", self._get_ground_truth_status()
+        
+        gt_dir = Path("groundtruth")
+        gt_dir.mkdir(exist_ok=True)
+        
+        uploaded = []
+        for file_path in files:
+            src = Path(file_path)
+            dest = gt_dir / src.name
+            shutil.copy(src, dest)
+            uploaded.append(src.name)
+        
+        return f"Uploaded {len(uploaded)} files: {', '.join(uploaded)}", self._get_ground_truth_status()
+
+    def _calculate_ground_truth_metrics(
+        self,
+    ) -> Tuple[str, List[Tuple[np.ndarray, str]]]:
+        """Calculate metrics comparing SAM/SAM2 results to ground truth."""
+        gt_dir = Path("groundtruth")
+        
+        if not gt_dir.exists():
+            return "Error: Ground truth folder not found.", []
+        
+        gt_files = sorted(gt_dir.glob("*.png"))
+        if not gt_files:
+            return "Error: No ground truth PNG files found.", []
+        
+        # Load ground truth images
+        gt_images = []
+        for gt_file in gt_files:
+            img = cv2.imread(str(gt_file))
+            if img is not None:
+                gt_images.append((gt_file.name, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
+        
+        if not gt_images:
+            return "Error: Could not load any ground truth images.", []
+        
+        # Create gallery images
+        gallery_images = [(img, name) for name, img in gt_images]
+        
+        # Initialize accuracy metrics calculator
+        accuracy_metrics = AccuracyMetrics()
+        
+        results_text = f"# Ground Truth Evaluation\n\n"
+        results_text += f"Found {len(gt_images)} ground truth masks.\n\n"
+        
+        # Compare SAM results if available
+        if self._sam_results is not None:
+            results_text += self._compare_with_ground_truth(
+                "SAM", self._sam_results, gt_images, accuracy_metrics
+            )
+        else:
+            results_text += "## SAM Results\nNo SAM segmentation results available. Run SAM first.\n\n"
+        
+        # Compare SAM2 results if available
+        if self._sam2_results is not None:
+            results_text += self._compare_with_ground_truth(
+                "SAM2", self._sam2_results, gt_images, accuracy_metrics
+            )
+        else:
+            results_text += "## SAM2 Results\nNo SAM2 segmentation results available. Run SAM2 first.\n\n"
+        
+        return results_text, gallery_images
+
+    def _compare_with_ground_truth(
+        self,
+        model_name: str,
+        results: Tuple[List[FrameData], List[PreprocessingResult], List[SegmentationResult], MetricsReport],
+        gt_images: List[Tuple[str, np.ndarray]],
+        accuracy_metrics: AccuracyMetrics,
+    ) -> str:
+        """Compare segmentation results with ground truth masks."""
+        frames, _, seg_results, _ = results
+        
+        text = f"## {model_name} vs Ground Truth\n\n"
+        
+        num_frames = len(seg_results)
+        num_gt = len(gt_images)
+        
+        if num_frames != num_gt:
+            text += f"⚠️ Warning: Frame count mismatch ({num_frames} frames vs {num_gt} ground truth masks)\n"
+            text += "Comparing up to the minimum count.\n\n"
+        
+        comparisons = min(num_frames, num_gt)
+        
+        all_metrics = []
+        
+        for i in range(comparisons):
+            seg_result = seg_results[i]
+            gt_name, gt_img = gt_images[i]
+            
+            # Combine prediction masks into binary mask
+            if seg_result.masks:
+                pred_mask = np.zeros_like(seg_result.masks[0], dtype=np.uint8)
+                for mask in seg_result.masks:
+                    pred_mask[mask > 0] = 255
+            else:
+                # No masks - create empty prediction
+                if frames:
+                    pred_mask = np.zeros((frames[0].height, frames[0].width), dtype=np.uint8)
+                else:
+                    pred_mask = np.zeros((gt_img.shape[0], gt_img.shape[1]), dtype=np.uint8)
+            
+            try:
+                metrics = accuracy_metrics.calculate_against_ground_truth(pred_mask, gt_img)
+                all_metrics.append(metrics)
+                
+                text += f"Frame {i} ({gt_name}):\n"
+                text += f"  IoU: {metrics['iou']:.4f} | Dice: {metrics['dice']:.4f} | "
+                text += f"Precision: {metrics['precision']:.4f} | Recall: {metrics['recall']:.4f}\n"
+            except ValueError as e:
+                text += f"Frame {i} ({gt_name}): Error - {str(e)}\n"
+        
+        # Calculate averages
+        if all_metrics:
+            avg_iou = np.mean([m['iou'] for m in all_metrics])
+            avg_dice = np.mean([m['dice'] for m in all_metrics])
+            avg_precision = np.mean([m['precision'] for m in all_metrics])
+            avg_recall = np.mean([m['recall'] for m in all_metrics])
+            
+            text += f"\n### {model_name} Average Metrics\n"
+            text += f"  **IoU**: {avg_iou:.4f}\n"
+            text += f"  **Dice**: {avg_dice:.4f}\n"
+            text += f"  **Precision**: {avg_precision:.4f}\n"
+            text += f"  **Recall**: {avg_recall:.4f}\n\n"
+        
+        return text
+
     def _run_sam_pipeline(
         self,
         video_path: str,
@@ -422,8 +641,7 @@ class WheatVisionApp:
         import cv2
         images = []
 
-        # Use green color for semantic mask (all wheat ears as one class)
-        color = (0, 255, 0)  # Green
+        color = (0, 255, 0)  
 
         for i, (frame, result) in enumerate(zip(frames, results)):
             overlay = frame.image.copy()
@@ -433,12 +651,10 @@ class WheatVisionApp:
                 mask_bool = mask > 0
                 mask_pixel_count += np.sum(mask_bool)
                 
-                # Fill mask with color blend
                 overlay[mask_bool] = (
                     0.5 * overlay[mask_bool] + 0.5 * np.array(color)
                 ).astype(np.uint8)
                 
-                # Draw contours for visibility
                 contours, _ = cv2.findContours(
                     mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
                 )
@@ -481,24 +697,22 @@ class WheatVisionApp:
         self,
         results: List[SegmentationResult],
         prefix: str,
-    ) -> List[str]:
-        """Export masks to exports directory."""
-        import shutil
+    ) -> str:
+        """Export masks as a ZIP file for single download."""
         
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / f"{prefix}_masks"
             paths = self._mask_exporter.export_batch(results, output_dir, ExportFormat.PNG)
             
-            export_dir = Path("exports") / f"{prefix}_masks"
+            export_dir = Path("exports")
             export_dir.mkdir(parents=True, exist_ok=True)
             
-            exported_files = []
-            for p in paths:
-                dest = export_dir / Path(p).name
-                shutil.copy(p, dest)
-                exported_files.append(str(dest))
+            zip_path = export_dir / f"{prefix}_masks.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for p in paths:
+                    zipf.write(p, Path(p).name)
             
-            return exported_files
+            return str(zip_path)
 
     def _export_sam_video(self) -> Optional[str]:
         """Export SAM video."""

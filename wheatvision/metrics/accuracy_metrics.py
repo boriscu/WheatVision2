@@ -209,6 +209,54 @@ class AccuracyMetrics(BaseMetric):
             "coverage_difference": report1.coverage_ratio - report2.coverage_ratio,
         }
 
+    def calculate_against_ground_truth(
+        self,
+        prediction: np.ndarray,
+        ground_truth: np.ndarray,
+    ) -> dict:
+        """
+        Calculate accuracy metrics comparing prediction to ground truth.
+        
+        Args:
+            prediction: Binary prediction mask (0 or 255).
+            ground_truth: Ground truth mask (any non-black pixel is foreground).
+            
+        Returns:
+            Dictionary with IoU, Dice, Precision, Recall.
+        """
+        # Convert prediction to binary
+        pred_binary = prediction > 0
+        
+        # Convert ground truth to binary (any non-black pixel is foreground)
+        if len(ground_truth.shape) == 3:
+            # Color image - any non-black pixel is foreground
+            gt_binary = np.any(ground_truth > 0, axis=2)
+        else:
+            # Grayscale image
+            gt_binary = ground_truth > 0
+        
+        # Ensure same shape
+        if pred_binary.shape != gt_binary.shape:
+            raise ValueError(f"Shape mismatch: prediction {pred_binary.shape} vs ground truth {gt_binary.shape}")
+        
+        # Calculate metrics
+        intersection = np.logical_and(pred_binary, gt_binary).sum()
+        union = np.logical_or(pred_binary, gt_binary).sum()
+        pred_sum = pred_binary.sum()
+        gt_sum = gt_binary.sum()
+        
+        iou = float(intersection / union) if union > 0 else 0.0
+        dice = float(2 * intersection / (pred_sum + gt_sum)) if (pred_sum + gt_sum) > 0 else 0.0
+        precision = float(intersection / pred_sum) if pred_sum > 0 else 0.0
+        recall = float(intersection / gt_sum) if gt_sum > 0 else 0.0
+        
+        return {
+            "iou": iou,
+            "dice": dice,
+            "precision": precision,
+            "recall": recall,
+        }
+
     def get_name(self) -> str:
         """Get the metric name."""
         return "Accuracy Metrics"

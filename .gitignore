@@ -212,3 +212,6 @@ external/
 # Exports and outputs
 output/
 exports/
+
+# Ground truth masks (user-specific)
+groundtruth/
