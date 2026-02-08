@@ -94,6 +94,13 @@ class GroundTruthTab:
                     columns=6,
                     height=200,
                 )
+            with gr.Column():
+                gr.Markdown("#### SAM3 vs Ground Truth")
+                sam3_overlay_gallery = gr.Gallery(
+                    label="SAM3 Overlay",
+                    columns=6,
+                    height=200,
+                )
 
         # Event handlers
         refresh_gt_btn.click(
@@ -109,7 +116,7 @@ class GroundTruthTab:
         
         calculate_metrics_btn.click(
             fn=self._calculate_ground_truth_metrics,
-            outputs=[summary_html, metrics_table, gt_gallery, sam_overlay_gallery, sam2_overlay_gallery],
+            outputs=[summary_html, metrics_table, gt_gallery, sam_overlay_gallery, sam2_overlay_gallery, sam3_overlay_gallery],
         )
 
     def _get_ground_truth_status(self) -> str:
@@ -145,17 +152,17 @@ class GroundTruthTab:
 
     def _calculate_ground_truth_metrics(
         self,
-    ) -> Tuple[str, List[List], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]]]:
-        """Calculate metrics comparing SAM/SAM2 results to ground truth."""
+    ) -> Tuple[str, List[List], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]], List[Tuple[np.ndarray, str]]]:
+        """Calculate metrics comparing SAM/SAM2/SAM3 results to ground truth."""
         gt_dir = Path("groundtruth")
         
         empty_html = "<p style='color: red;'>Error: Ground truth not available.</p>"
         if not gt_dir.exists():
-            return empty_html, [], [], [], []
+            return empty_html, [], [], [], [], []
         
         gt_files = sorted(gt_dir.glob("*.png"))
         if not gt_files:
-            return "<p style='color: red;'>Error: No ground truth PNG files found.</p>", [], [], [], []
+            return "<p style='color: red;'>Error: No ground truth PNG files found.</p>", [], [], [], [], []
         
         gt_images = []
         for gt_file in gt_files:
@@ -164,7 +171,7 @@ class GroundTruthTab:
                 gt_images.append((gt_file.name, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
         
         if not gt_images:
-            return "<p style='color: red;'>Error: Could not load any ground truth images.</p>", [], [], [], []
+            return "<p style='color: red;'>Error: Could not load any ground truth images.</p>", [], [], [], [], []
         
         gallery_images = [(img, name) for name, img in gt_images]
         
@@ -176,8 +183,10 @@ class GroundTruthTab:
         all_rows = []
         sam_summary = None
         sam2_summary = None
+        sam3_summary = None
         sam_overlays = []
         sam2_overlays = []
+        sam3_overlays = []
         
         if self._state.sam_results is not None:
             sam_summary, sam_rows, sam_overlays = self._compare_with_ground_truth_extended(
@@ -191,9 +200,15 @@ class GroundTruthTab:
             )
             all_rows.extend(sam2_rows)
         
-        html = self._build_summary_html(len(gt_images), gt_summary, sam_summary, sam2_summary)
+        if self._state.sam3_results is not None:
+            sam3_summary, sam3_rows, sam3_overlays = self._compare_with_ground_truth_extended(
+                "SAM3", self._state.sam3_results, gt_images, accuracy_metrics
+            )
+            all_rows.extend(sam3_rows)
         
-        return html, all_rows, gallery_images, sam_overlays, sam2_overlays
+        html = self._build_summary_html(len(gt_images), gt_summary, sam_summary, sam2_summary, sam3_summary)
+        
+        return html, all_rows, gallery_images, sam_overlays, sam2_overlays, sam3_overlays
 
     def _calculate_gt_stats(self, gt_images: List[Tuple[str, np.ndarray]]) -> dict:
         """Calculate statistics from ground truth images."""
@@ -318,8 +333,9 @@ class GroundTruthTab:
         gt_summary: dict,
         sam_summary: Optional[dict],
         sam2_summary: Optional[dict],
+        sam3_summary: Optional[dict] = None,
     ) -> str:
-        """Build HTML summary comparison table with GT, SAM, and SAM2 columns."""
+        """Build HTML summary comparison table with GT, SAM, SAM2, and SAM3 columns."""
         html = f"""
         <div style="font-family: Arial, sans-serif;">
             <h3>📊 Evaluation Summary ({num_gt_frames} frames)</h3>
@@ -330,6 +346,7 @@ class GroundTruthTab:
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: center; background-color: #fff3cd;">Ground Truth</th>
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">SAM</th>
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">SAM2</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">SAM3</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -382,14 +399,17 @@ class GroundTruthTab:
                 gt_val = get_val_int(gt_summary, key) if has_gt else "<i>—</i>"
                 sam_val = get_val_int(sam_summary, key)
                 sam2_val = get_val_int(sam2_summary, key)
+                sam3_val = get_val_int(sam3_summary, key)
             else:
                 gt_val = get_val(gt_summary, key, fmt) if has_gt else "<i>—</i>"
                 sam_val = get_val(sam_summary, key, fmt)
                 sam2_val = get_val(sam2_summary, key, fmt)
+                sam3_val = get_val(sam3_summary, key, fmt)
             
             # Highlight predictions that are close to GT
             sam_style = compare_to_gt(sam_summary, gt_summary, key) if has_gt else ""
             sam2_style = compare_to_gt(sam2_summary, gt_summary, key) if has_gt else ""
+            sam3_style = compare_to_gt(sam3_summary, gt_summary, key) if has_gt else ""
             
             html += f"""
                     <tr>
@@ -397,6 +417,7 @@ class GroundTruthTab:
                         <td style="padding: 8px; border: 1px solid #ddd; text-align: center; background-color: #fff3cd;">{gt_val}</td>
                         <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {sam_style}">{sam_val}</td>
                         <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {sam2_style}">{sam2_val}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {sam3_style}">{sam3_val}</td>
                     </tr>
             """
         

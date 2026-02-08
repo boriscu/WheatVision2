@@ -1,10 +1,11 @@
 """Factory for creating segmentation engines."""
 
 from wheatvision.config.constants import SegmentationModel
-from wheatvision.config.settings import get_sam_settings, get_sam2_settings
+from wheatvision.config.settings import get_sam_settings, get_sam2_settings, get_sam3_settings
 from wheatvision.engines.base_engine import BaseSegmentationEngine
 from wheatvision.engines.sam_engine import SAMEngine
 from wheatvision.engines.sam2_engine import SAM2Engine
+from wheatvision.engines.sam3_engine import SAM3Engine
 
 
 class SegmentationEngineFactory:
@@ -33,6 +34,8 @@ class SegmentationEngineFactory:
             return SAMEngine(get_sam_settings())
         elif model_type == SegmentationModel.SAM2:
             return SAM2Engine(get_sam2_settings())
+        elif model_type == SegmentationModel.SAM3:
+            return SAM3Engine(get_sam3_settings())
         else:
             raise ValueError(f"Unknown segmentation model type: {model_type}")
 
@@ -57,6 +60,16 @@ class SegmentationEngineFactory:
         return SAM2Engine(get_sam2_settings())
 
     @staticmethod
+    def create_sam3() -> SAM3Engine:
+        """
+        Create a SAM3 engine with default settings.
+        
+        Returns:
+            Configured SAM3Engine instance.
+        """
+        return SAM3Engine(get_sam3_settings())
+
+    @staticmethod
     def get_available_models() -> list[SegmentationModel]:
         """
         Get list of available segmentation models.
@@ -64,4 +77,5 @@ class SegmentationEngineFactory:
         Returns:
             List of supported SegmentationModel values.
         """
-        return [SegmentationModel.SAM, SegmentationModel.SAM2]
+        return [SegmentationModel.SAM, SegmentationModel.SAM2, SegmentationModel.SAM3]
+

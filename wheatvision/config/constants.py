@@ -8,6 +8,7 @@ class SegmentationModel(str, Enum):
 
     SAM = "sam"
     SAM2 = "sam2"
+    SAM3 = "sam3"
 
 
 class ExportFormat(str, Enum):

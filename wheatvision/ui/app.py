@@ -3,7 +3,7 @@
 import gradio as gr
 
 from wheatvision.ui.state import AppState
-from wheatvision.ui.tabs import SAMTab, SAM2Tab, ComparisonTab, GroundTruthTab
+from wheatvision.ui.tabs import SAMTab, SAM2Tab, SAM3Tab, ComparisonTab, GroundTruthTab
 from wheatvision.utils import setup_logging, get_logger
 
 _logger = get_logger("ui")
@@ -11,11 +11,12 @@ _logger = get_logger("ui")
 
 class WheatVisionApp:
     """
-    Main Gradio application for SAM vs SAM2 comparison.
+    Main Gradio application for SAM vs SAM2 vs SAM3 comparison.
     
     Provides a tabbed interface for:
     - SAM: Frame-by-frame segmentation
     - SAM2: Video propagation segmentation
+    - SAM3: Promptable concept segmentation
     - Comparison: Side-by-side metrics comparison
     - Ground Truth: Evaluation against ground truth masks
     """
@@ -27,6 +28,7 @@ class WheatVisionApp:
         # Initialize tab components with shared state
         self._sam_tab = SAMTab(self._state)
         self._sam2_tab = SAM2Tab(self._state)
+        self._sam3_tab = SAM3Tab(self._state)
         self._comparison_tab = ComparisonTab(self._state)
         self._ground_truth_tab = GroundTruthTab(self._state)
 
@@ -38,12 +40,12 @@ class WheatVisionApp:
             Gradio Blocks application.
         """
         with gr.Blocks(
-            title="WheatVision2 - SAM vs SAM2 Comparison",
+            title="WheatVision2 - SAM vs SAM2 vs SAM3 Comparison",
             theme=gr.themes.Soft(),
         ) as app:
             gr.Markdown("# 🌾 WheatVision2 - Segmentation Model Comparison")
             gr.Markdown(
-                "Compare SAM (frame-by-frame) vs SAM2 (video propagation) "
+                "Compare SAM (frame-by-frame) vs SAM2 (video propagation) vs SAM3 (promptable concept) "
                 "for wheat ear segmentation."
             )
 
@@ -53,6 +55,9 @@ class WheatVisionApp:
 
                 with gr.Tab("SAM2 (Video Propagation)"):
                     self._sam2_tab.build()
+
+                with gr.Tab("SAM3 (Promptable Concept)"):
+                    self._sam3_tab.build()
 
                 with gr.Tab("Comparison"):
                     self._comparison_tab.build()
@@ -80,3 +85,4 @@ def launch_app() -> None:
 
 if __name__ == "__main__":
     launch_app()
+

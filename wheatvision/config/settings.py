@@ -52,6 +52,27 @@ class SAM2Settings(BaseSettings):
         return Path(value) if isinstance(value, str) else value
 
 
+class SAM3Settings(BaseSettings):
+    """Configuration for SAM3 promptable concept segmentation model."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="WHEATVISION_SAM3_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    repo: Path = Path("external/sam3_repo")
+    cfg: str = "configs/sam3/sam3_hiera_l.yaml"
+    ckpt: Path = Path("external/sam3_repo/checkpoints/sam3_hiera_large.pt")
+    device: str = "cuda"
+
+    @field_validator("repo", "ckpt", mode="before")
+    @classmethod
+    def _convert_to_path(cls, value: str | Path) -> Path:
+        """Convert string paths to Path objects."""
+        return Path(value) if isinstance(value, str) else value
+
+
 class PreprocessingSettings(BaseSettings):
     """Configuration for image preprocessing."""
 
@@ -115,6 +136,12 @@ def get_sam_settings() -> SAMSettings:
 def get_sam2_settings() -> SAM2Settings:
     """Get cached SAM2 settings instance."""
     return SAM2Settings()
+
+
+@lru_cache
+def get_sam3_settings() -> SAM3Settings:
+    """Get cached SAM3 settings instance."""
+    return SAM3Settings()
 
 
 @lru_cache

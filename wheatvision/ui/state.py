@@ -20,6 +20,7 @@ class AppState:
     # Pipelines
     sam_pipeline: Optional[SegmentationPipeline] = None
     sam2_pipeline: Optional[SegmentationPipeline] = None
+    sam3_pipeline: Optional[SegmentationPipeline] = None
     
     # Results: (frames, preprocess_results, seg_results, metrics)
     sam_results: Optional[Tuple[
@@ -36,8 +37,16 @@ class AppState:
         MetricsReport
     ]] = None
     
+    sam3_results: Optional[Tuple[
+        List[FrameData], 
+        List[PreprocessingResult], 
+        List[SegmentationResult], 
+        MetricsReport
+    ]] = None
+    
     # Exporters
     metrics_calculator: MetricsCalculator = field(default_factory=MetricsCalculator)
     mask_exporter: MaskExporter = field(default_factory=MaskExporter)
     video_exporter: VideoExporter = field(default_factory=VideoExporter)
     report_exporter: ReportExporter = field(default_factory=ReportExporter)
+
